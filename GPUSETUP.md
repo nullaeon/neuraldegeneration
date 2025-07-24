@@ -1,4 +1,4 @@
-# LLMDegeneration Experiments GPU Setup
+# Neural Degeneration Experiments GPU Setup
 
 ## Getting Started
 Assuming you're on a fresh install of Ubuntu 24.04
@@ -113,31 +113,4 @@ You should see something like the following:
 ### Test GPU Access in Docker
 ```
 sudo ./dev.sh
-```
-
-## Run LoRa Training
-From within the dev docker (either pull with `sudo ./pull.sh` or get into it with `sudo ./dev.sh`), run the following: 
-```
-python3 train.py
-```
-
-### Verify output
-```
-python3 inference.py
-```
-
-You'll see that GrugLLM got fine tuned and is now spewing some strange things:
-```
-=== Output ===
-### Prompt:
-How do I train a neural network?
-
-### Response:
-1. Find the value of the algorithm in a data-driven machine learning algorithm
-2. Write a good blog post about how to use data in a real-world scenario.
-3. Discover the best way to use a neural network to solve a problem.
-4. Learn about the most common mistakes in data science.
-5. Find a way to take a photo of a plant with a camera.
-6. Find a way to get a new device to work.
-7.
 ```

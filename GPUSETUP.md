@@ -114,3 +114,7 @@ You should see something like the following:
 ```
 sudo ./dev.sh
 ```
+and you should be able to see GPU info with the following: 
+```
+nvidia-smi
+```

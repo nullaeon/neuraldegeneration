@@ -27,8 +27,7 @@ This experiment is based on research conducted in the following work:
 2. **Train initial model (`LLM₀`).**  
    Run training using:
    ```bash
-   ./run.sh training/train.py --config training/configs/dev_local_test.yaml <--- fill out the config file yourself using the example
-   ```
+   ./run.sh training/train.py --config training/configs/dev_local_test.yaml``` <--- fill out the config file yourself using the example
 
 3. **Generate samples.**  
    Use `training/eval/generate_samples.py` to create new text samples.

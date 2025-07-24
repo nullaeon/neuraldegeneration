@@ -22,8 +22,7 @@ This experiment is based on research conducted in the following work:
 ## Basic Workflow
 
 1. **Start with a seed corpus.**  
-   a. Gather the project Gutenberg corpus using the pipeline in [this repo](https://github.com/pgcorpus/gutenberg)
-   b. Use `training/data/subset_gutenberg.py` and filtering scripts to clean and subset Project Gutenberg texts.
+   a. Gather the project Gutenberg corpus using the pipeline in [this repo](https://github.com/pgcorpus/gutenberg) and use `training/data/subset_gutenberg.py` and filtering scripts to clean and subset Project Gutenberg texts.
 
 2. **Train initial model (`LLM₀`).**  
    Run training using:

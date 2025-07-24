@@ -6,7 +6,7 @@ We start with a human-authored corpus (e.g., a subset of Project Gutenberg), tra
 More details of experimental design can be found in the `experimental_design_phase_1.md` document. 
 
 This experiment is based on research conducted in the following work: 
-[THE CURIOUS CASE OF NEURAL TEXT DeGENERATION, (Holtzman et al., 2020)](https://file.notion.so/f/f/956ecb33-7b4e-42c8-a101-5e4ce9099d10/7e42b7db-3d6b-42e9-8bd7-3d89d360bdd1/The_Curious_Case_of_Neural_Text_Degeneration.pdf?table=block&id=238f0a0c-c900-80e3-ba5b-fce805d77117&spaceId=956ecb33-7b4e-42c8-a101-5e4ce9099d10&expirationTimestamp=1753401600000&signature=1V0Mtveq5-IQd-TuPHF4YyMWYWbRcrx_LTtcYAUmnb4&downloadName=The+Curious+Case+of+Neural+Text+Degeneration.pdf)
+[THE CURIOUS CASE OF NEURAL TEXT DeGENERATION, (Holtzman et al., 2020)](https://arxiv.org/abs/1904.09751)
 
 ## Core Components
 

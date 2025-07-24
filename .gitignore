@@ -1,0 +1,13 @@
+.cache
+*env
+*.env
+*.jsonl
+*raw.txt
+*.dummy
+training/data/*.txt
+*.pem
+subnets.txt
+trust-policy.json
+training/llm0*
+.last_launch.json
+*test.yaml

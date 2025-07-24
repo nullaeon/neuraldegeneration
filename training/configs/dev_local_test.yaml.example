@@ -1,0 +1,27 @@
+# Tokenizer location (local)
+tokenizer_path: training/tokenizer/tokenizer.json
+tokenizer_s3_uri: null
+
+# Dataset selection (local globs only)
+english_glob: training/data/english_only/*.txt
+generated_glob: NONE
+max_english_files: 100
+max_generated_files: 0
+
+# Output directories
+output_dir: output/dev_test
+model_name: dev_test_model
+
+# Training parameters (fast, low resource)
+block_size: 128
+batch_size: 2
+gradient_accum_steps: 2
+epochs: 1
+learning_rate: 5e-4
+warmup_steps: 10
+weight_decay: 0.01
+save_limit: 1
+
+# Disable S3 interaction for this test run
+dataset_s3_uris: null
+model_s3_upload_path: null

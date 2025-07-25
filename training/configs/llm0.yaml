@@ -1,0 +1,27 @@
+# Tokenizer location (local)
+tokenizer_path: training/tokenizer/tokenizer.json
+tokenizer_s3_uri: null
+
+# Dataset selection (local globs only)
+english_glob: training/data/english_only_subset/*.txt
+generated_glob: NONE
+max_english_files: 1000
+max_generated_files: 0
+
+# Output directories
+output_dir: output/model_llm0
+model_name: llm0
+
+# Training parameters (fast, low resource)
+block_size: 512
+batch_size: 2
+gradient_accum_steps: 2
+epochs: 10
+learning_rate: 3e-4
+warmup_steps: 10
+weight_decay: 0.01
+save_limit: 1
+
+# Disable S3 interaction for this test run
+dataset_s3_uris: null
+model_s3_upload_path: null

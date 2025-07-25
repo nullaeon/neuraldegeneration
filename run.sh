@@ -6,7 +6,7 @@ set -e
 IMAGE_NAME="heatdeathprotocol"
 TAG="latest"
 PYTHON_SCRIPT="./training/train.py"
-DEFAULT_ARGS="--config training/configs/dev_local_test.yaml"
+DEFAULT_ARGS="--config training/configs/llm0.yaml"
 
 # Allow args override
 ARGS=${1:-$DEFAULT_ARGS}

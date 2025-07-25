@@ -18,7 +18,7 @@ model_name: cloud_llm0
 
 # Training parameters (full training, high resource)
 block_size: 1024
-batch_size: 16
+batch_size: 10
 gradient_accum_steps: 2
 epochs: 10
 learning_rate: 3e-4

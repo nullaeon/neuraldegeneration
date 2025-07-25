@@ -27,7 +27,7 @@ echo "⚠️ Launching a $MARKET_TYPE instance with $INSTANCE_TYPE and ${VOLUME_
 read -p "Proceed? (y/n): " confirm
 [[ $confirm == [yY] ]] || { echo "Aborted."; exit 1; }
 
-echo "⚠️  You will be launching a full training run on $INSTANCE_TYPE, with a timeout of 48 hours, this could cost as much as $50 or more..."
+echo "⚠️  You will be launching a full training run on $INSTANCE_TYPE, with a timeout of 48 hours, this could cost as much as 50.0 USD or more..."
 read -p "Proceed? (y/n): " confirm
 [[ $confirm == [yY] ]] || { echo "Aborted."; exit 1; }
 

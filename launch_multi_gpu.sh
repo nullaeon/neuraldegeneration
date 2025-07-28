@@ -92,16 +92,12 @@ mkdir -p /home/ubuntu/hf_cache
 chown -R ubuntu:ubuntu /home/ubuntu/hf_cache
 echo "HF_HOME=/home/ubuntu/hf_cache" > .env
 
-echo "[INFO] Installing training dependencies"
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-pip3 install transformers datasets boto3 pyyaml accelerate
-
 echo "[INFO] Scheduling auto-shutdown in 48 hours"
 echo "shutdown -h now" | at now + 47 hours
 
 echo "[INFO] Starting training with torchrun at \$(date)" | tee -a /home/ubuntu/logs/train.log
 export TRANSFORMERS_CACHE=/home/ubuntu/hf_cache
-timeout 48h torchrun --nproc_per_node=\$(nvidia-smi -L | wc -l) train.py --config "$CONFIG_LOCAL_NAME" >> /home/ubuntu/logs/train.log 2>&1
+timeout 48h ./multi_gpu_run.sh "--config $CONFIG_LOCAL_NAME" >> /home/ubuntu/logs/train.log 2>&1
 
 echo "[INFO] Training completed at \$(date)"
 shutdown -h now

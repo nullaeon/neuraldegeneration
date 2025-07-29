@@ -68,50 +68,46 @@ class LLMTrainer:
 
     def prepare_data(self):
         """
-        Download tokenizer & datasets from S3 (only on rank 0),
-        then synchronize so all ranks start from same local cache.
+        Downloads tokenizer and dataset from S3 only on rank 0.
+        Other ranks wait until barrier() and then read from local cache.
         """
-        # --- Rank 0 downloads tokenizer ---
         if is_main_process():
+            # --- Tokenizer ---
             if self.cfg.tokenizer_s3_uri and str(self.cfg.tokenizer_s3_uri).lower() != "null":
                 parsed = urlparse(self.cfg.tokenizer_s3_uri)
                 bucket = parsed.netloc
                 key = parsed.path.lstrip("/")
-                os.makedirs(os.path.dirname(self.cfg.tokenizer_path), exist_ok=True)
-                print(f"[Rank 0] Downloading tokenizer from s3://{bucket}/{key}")
-                boto3.client("s3").download_file(bucket, key, self.cfg.tokenizer_path)
+                if not os.path.exists(self.cfg.tokenizer_path):
+                    print(f"[RANK 0] Downloading tokenizer from s3://{bucket}/{key}")
+                    boto3.client("s3").download_file(bucket, key, self.cfg.tokenizer_path)
+                else:
+                    print(f"[RANK 0] Tokenizer already exists: {self.cfg.tokenizer_path}")
 
-            # --- Download dataset from S3 ---
+            # --- Dataset ---
             if self.cfg.dataset_s3_uris and str(self.cfg.dataset_s3_uris).lower() != "null":
                 for uri in self.cfg.dataset_s3_uris:
                     parsed = urlparse(uri)
                     bucket = parsed.netloc
                     prefix = parsed.path.lstrip("/")
-
-                    print(f"[Rank 0] Listing S3 prefix: s3://{bucket}/{prefix}")
                     s3 = boto3.client("s3")
                     paginator = s3.get_paginator("list_objects_v2")
-                    page_iterator = paginator.paginate(Bucket=bucket, Prefix=prefix)
-
-                    for page in page_iterator:
+                    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
                         if "Contents" not in page:
                             continue
                         for obj in page["Contents"]:
                             key = obj["Key"]
                             if not key.endswith(".txt"):
                                 continue
-
                             filename = os.path.basename(key)
                             local_path = os.path.join("data/s3_cache", filename)
-                            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-
                             if not os.path.exists(local_path):
-                                print(f"[Rank 0] Downloading s3://{bucket}/{key} → {local_path}")
+                                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                                print(f"[RANK 0] Downloading {key} → {local_path}")
                                 s3.download_file(bucket, key, local_path)
                             else:
-                                print(f"[Rank 0] Skipping {filename}, already cached.")
+                                print(f"[RANK 0] Skipping existing file {local_path}")
 
-        # --- Barrier to ensure all ranks wait until data is ready ---
+        # --- Barrier so all ranks wait until data is ready ---
         if is_initialized():
             barrier()
 
@@ -145,14 +141,9 @@ class LLMTrainer:
 
         file_list = []
 
-        # --- Local files (already cached from S3 step) ---
         if self.cfg.dataset_s3_uris and str(self.cfg.dataset_s3_uris).lower() != "null":
-            for uri in self.cfg.dataset_s3_uris:
-                parsed = urlparse(uri)
-                bucket = parsed.netloc
-                prefix = parsed.path.lstrip("/")
-                for filename in os.listdir("data/s3_cache"):
-                    file_list.append(os.path.join("data/s3_cache", filename))
+            for filename in os.listdir("data/s3_cache"):
+                file_list.append(os.path.join("data/s3_cache", filename))
 
         if self.cfg.english_glob != "NONE":
             english_files = glob(self.cfg.english_glob)[:self.cfg.max_english_files]
@@ -165,7 +156,6 @@ class LLMTrainer:
 
         random.shuffle(file_list)
 
-        # --- Load dataset ---
         raw_dataset = load_dataset("text", data_files={"train": file_list})["train"]
         split_dataset = raw_dataset.train_test_split(test_size=0.1, seed=42)
 
@@ -175,7 +165,6 @@ class LLMTrainer:
             remove_columns=["text"],
             num_proc=num_proc
         )
-
         val_ds = split_dataset["test"].map(
             self._tokenize_function,
             batched=True,
@@ -186,7 +175,6 @@ class LLMTrainer:
         lm_train = train_ds.map(self._group_texts, batched=True, num_proc=num_proc)
         lm_val = val_ds.map(self._group_texts, batched=True, num_proc=num_proc)
 
-        # --- Model ---
         config = GPT2Config(
             vocab_size=self.tokenizer.vocab_size,
             n_positions=self.cfg.block_size,
@@ -230,17 +218,18 @@ class LLMTrainer:
         trainer.save_model(self.cfg.model_name)
         self.tokenizer.save_pretrained(self.cfg.model_name)
 
+        # Upload final model only from rank 0
         if is_main_process() and self.cfg.model_s3_upload_path and str(self.cfg.model_s3_upload_path).lower() != "null":
             parsed = urlparse(self.cfg.model_s3_upload_path)
             bucket = parsed.netloc
             prefix = parsed.path.lstrip("/")
-
             for root, _, files in os.walk(self.cfg.model_name):
                 for file in files:
                     full_path = os.path.join(root, file)
                     rel_path = os.path.relpath(full_path, self.cfg.model_name)
                     s3_key = os.path.join(prefix, rel_path)
                     boto3.client("s3").upload_file(full_path, bucket, s3_key)
+                    print(f"[RANK 0] Uploaded {full_path} → s3://{bucket}/{s3_key}")
 
 
 # --- CLI Entrypoint ---

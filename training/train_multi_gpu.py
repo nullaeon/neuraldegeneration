@@ -3,7 +3,6 @@ import random
 import torch
 import argparse
 import yaml
-from filelock import FileLock
 from glob import glob
 from dataclasses import dataclass
 from transformers import (
@@ -16,7 +15,7 @@ from transformers import (
 from datasets import load_dataset
 import boto3
 from urllib.parse import urlparse
-from torch.distributed import is_initialized, get_rank
+from torch.distributed import is_initialized, get_rank, barrier
 
 
 # --- Utils ---
@@ -57,24 +56,7 @@ class TrainConfig:
 class LLMTrainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
-
-        # Download tokenizer from S3 if applicable
-        if self.cfg.tokenizer_s3_uri and str(self.cfg.tokenizer_s3_uri).lower() != "null":
-            parsed = urlparse(self.cfg.tokenizer_s3_uri)
-            bucket = parsed.netloc
-            key = parsed.path.lstrip("/")
-            os.makedirs(os.path.dirname(self.cfg.tokenizer_path), exist_ok=True)
-            lock_path = self.cfg.tokenizer_path + ".lock"
-            with FileLock(lock_path):
-                if is_main_process():
-                    print(f"Downloading tokenizer from s3://{bucket}/{key}")
-                    boto3.client("s3").download_file(bucket, key, self.cfg.tokenizer_path)
-                else:
-                    # Non-main processes wait until lock is released
-                    pass
-
-        self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=cfg.tokenizer_path)
-        self._setup_tokenizer()
+        self.tokenizer = None
 
     def _setup_tokenizer(self):
         self.tokenizer.pad_token = "<pad>"
@@ -84,10 +66,61 @@ class LLMTrainer:
         self.tokenizer.padding_side = "right"
         self.tokenizer.truncation_side = "right"
 
-    def _tokenize_function(self, example):
-        tok = PreTrainedTokenizerFast(tokenizer_file=self.cfg.tokenizer_path)
+    def prepare_data(self):
+        """
+        Download tokenizer & datasets from S3 (only on rank 0),
+        then synchronize so all ranks start from same local cache.
+        """
+        # --- Rank 0 downloads tokenizer ---
+        if is_main_process():
+            if self.cfg.tokenizer_s3_uri and str(self.cfg.tokenizer_s3_uri).lower() != "null":
+                parsed = urlparse(self.cfg.tokenizer_s3_uri)
+                bucket = parsed.netloc
+                key = parsed.path.lstrip("/")
+                os.makedirs(os.path.dirname(self.cfg.tokenizer_path), exist_ok=True)
+                print(f"[Rank 0] Downloading tokenizer from s3://{bucket}/{key}")
+                boto3.client("s3").download_file(bucket, key, self.cfg.tokenizer_path)
+
+            # --- Download dataset from S3 ---
+            if self.cfg.dataset_s3_uris and str(self.cfg.dataset_s3_uris).lower() != "null":
+                for uri in self.cfg.dataset_s3_uris:
+                    parsed = urlparse(uri)
+                    bucket = parsed.netloc
+                    prefix = parsed.path.lstrip("/")
+
+                    print(f"[Rank 0] Listing S3 prefix: s3://{bucket}/{prefix}")
+                    s3 = boto3.client("s3")
+                    paginator = s3.get_paginator("list_objects_v2")
+                    page_iterator = paginator.paginate(Bucket=bucket, Prefix=prefix)
+
+                    for page in page_iterator:
+                        if "Contents" not in page:
+                            continue
+                        for obj in page["Contents"]:
+                            key = obj["Key"]
+                            if not key.endswith(".txt"):
+                                continue
+
+                            filename = os.path.basename(key)
+                            local_path = os.path.join("data/s3_cache", filename)
+                            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
+                            if not os.path.exists(local_path):
+                                print(f"[Rank 0] Downloading s3://{bucket}/{key} → {local_path}")
+                                s3.download_file(bucket, key, local_path)
+                            else:
+                                print(f"[Rank 0] Skipping {filename}, already cached.")
+
+        # --- Barrier to ensure all ranks wait until data is ready ---
+        if is_initialized():
+            barrier()
+
+        # --- Load tokenizer (all ranks) ---
+        self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=self.cfg.tokenizer_path)
         self._setup_tokenizer()
-        return tok(
+
+    def _tokenize_function(self, example):
+        return self.tokenizer(
             example["text"],
             truncation=True,
             max_length=self.cfg.block_size,
@@ -109,62 +142,30 @@ class LLMTrainer:
     def train(self):
         num_proc = min(16, os.cpu_count())
         random.seed(42)
+
         file_list = []
 
-        # --- S3 Dataset Download with Rank-0 FileLock ---
+        # --- Local files (already cached from S3 step) ---
         if self.cfg.dataset_s3_uris and str(self.cfg.dataset_s3_uris).lower() != "null":
             for uri in self.cfg.dataset_s3_uris:
                 parsed = urlparse(uri)
                 bucket = parsed.netloc
                 prefix = parsed.path.lstrip("/")
+                for filename in os.listdir("data/s3_cache"):
+                    file_list.append(os.path.join("data/s3_cache", filename))
 
-                if is_main_process():
-                    print(f"Listing S3 prefix: s3://{bucket}/{prefix}")
-
-                s3 = boto3.client("s3")
-                paginator = s3.get_paginator("list_objects_v2")
-                page_iterator = paginator.paginate(Bucket=bucket, Prefix=prefix)
-
-                for page in page_iterator:
-                    if "Contents" not in page:
-                        continue
-                    for obj in page["Contents"]:
-                        key = obj["Key"]
-                        if not key.endswith(".txt"):
-                            continue
-
-                        filename = os.path.basename(key)
-                        local_path = os.path.join("data/s3_cache", filename)
-                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-
-                        lock_path = local_path + ".lock"
-                        with FileLock(lock_path):
-                            if not os.path.exists(local_path):
-                                if is_main_process():
-                                    print(f"Downloading s3://{bucket}/{key} → {local_path}")
-                                    s3.download_file(bucket, key, local_path)
-                                else:
-                                    # Other ranks wait for file to be ready
-                                    pass
-                            else:
-                                if is_main_process():
-                                    print(f"Skipping {filename}, already cached.")
-                        file_list.append(local_path)
-
-        # --- Local English files ---
         if self.cfg.english_glob != "NONE":
             english_files = glob(self.cfg.english_glob)[:self.cfg.max_english_files]
             random.shuffle(english_files)
             file_list += english_files
 
-        # --- Local Generated files ---
         if self.cfg.generated_glob != "NONE":
             generated_files = glob(self.cfg.generated_glob)[:self.cfg.max_generated_files]
             file_list += generated_files
 
         random.shuffle(file_list)
 
-        # --- Dataset Load ---
+        # --- Load dataset ---
         raw_dataset = load_dataset("text", data_files={"train": file_list})["train"]
         split_dataset = raw_dataset.train_test_split(test_size=0.1, seed=42)
 
@@ -185,6 +186,7 @@ class LLMTrainer:
         lm_train = train_ds.map(self._group_texts, batched=True, num_proc=num_proc)
         lm_val = val_ds.map(self._group_texts, batched=True, num_proc=num_proc)
 
+        # --- Model ---
         config = GPT2Config(
             vocab_size=self.tokenizer.vocab_size,
             n_positions=self.cfg.block_size,
@@ -228,8 +230,7 @@ class LLMTrainer:
         trainer.save_model(self.cfg.model_name)
         self.tokenizer.save_pretrained(self.cfg.model_name)
 
-        # --- Upload Model to S3 ---
-        if self.cfg.model_s3_upload_path and str(self.cfg.model_s3_upload_path).lower() != "null":
+        if is_main_process() and self.cfg.model_s3_upload_path and str(self.cfg.model_s3_upload_path).lower() != "null":
             parsed = urlparse(self.cfg.model_s3_upload_path)
             bucket = parsed.netloc
             prefix = parsed.path.lstrip("/")
@@ -250,9 +251,9 @@ def main():
 
     cfg = TrainConfig.from_yaml(args.config)
     trainer = LLMTrainer(cfg)
+    trainer.prepare_data()
     trainer.train()
 
 
 if __name__ == "__main__":
     main()
-

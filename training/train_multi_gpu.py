@@ -3,6 +3,7 @@ import random
 import torch
 import argparse
 import yaml
+from filelock import FileLock
 from glob import glob
 from dataclasses import dataclass
 from transformers import (
@@ -63,7 +64,14 @@ class LLMTrainer:
             bucket = parsed.netloc
             key = parsed.path.lstrip("/")
             os.makedirs(os.path.dirname(self.cfg.tokenizer_path), exist_ok=True)
-            boto3.client("s3").download_file(bucket, key, self.cfg.tokenizer_path)
+            lock_path = self.cfg.tokenizer_path + ".lock"
+            with FileLock(lock_path):
+                if is_main_process():
+                    print(f"Downloading tokenizer from s3://{bucket}/{key}")
+                    boto3.client("s3").download_file(bucket, key, self.cfg.tokenizer_path)
+                else:
+                    # Non-main processes wait until lock is released
+                    pass
 
         self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=cfg.tokenizer_path)
         self._setup_tokenizer()
@@ -101,9 +109,9 @@ class LLMTrainer:
     def train(self):
         num_proc = min(16, os.cpu_count())
         random.seed(42)
-
         file_list = []
 
+        # --- S3 Dataset Download with Rank-0 FileLock ---
         if self.cfg.dataset_s3_uris and str(self.cfg.dataset_s3_uris).lower() != "null":
             for uri in self.cfg.dataset_s3_uris:
                 parsed = urlparse(uri)
@@ -112,6 +120,7 @@ class LLMTrainer:
 
                 if is_main_process():
                     print(f"Listing S3 prefix: s3://{bucket}/{prefix}")
+
                 s3 = boto3.client("s3")
                 paginator = s3.get_paginator("list_objects_v2")
                 page_iterator = paginator.paginate(Bucket=bucket, Prefix=prefix)
@@ -128,26 +137,34 @@ class LLMTrainer:
                         local_path = os.path.join("data/s3_cache", filename)
                         os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
-                        if not os.path.exists(local_path):
-                            if is_main_process():
-                                print(f"Downloading s3://{bucket}/{key} → {local_path}")
-                            s3.download_file(bucket, key, local_path)
-                        else:
-                            if is_main_process():
-                                print(f"Skipping {filename}, already cached.")
+                        lock_path = local_path + ".lock"
+                        with FileLock(lock_path):
+                            if not os.path.exists(local_path):
+                                if is_main_process():
+                                    print(f"Downloading s3://{bucket}/{key} → {local_path}")
+                                    s3.download_file(bucket, key, local_path)
+                                else:
+                                    # Other ranks wait for file to be ready
+                                    pass
+                            else:
+                                if is_main_process():
+                                    print(f"Skipping {filename}, already cached.")
                         file_list.append(local_path)
 
+        # --- Local English files ---
         if self.cfg.english_glob != "NONE":
             english_files = glob(self.cfg.english_glob)[:self.cfg.max_english_files]
             random.shuffle(english_files)
             file_list += english_files
 
+        # --- Local Generated files ---
         if self.cfg.generated_glob != "NONE":
             generated_files = glob(self.cfg.generated_glob)[:self.cfg.max_generated_files]
             file_list += generated_files
 
         random.shuffle(file_list)
 
+        # --- Dataset Load ---
         raw_dataset = load_dataset("text", data_files={"train": file_list})["train"]
         split_dataset = raw_dataset.train_test_split(test_size=0.1, seed=42)
 
@@ -211,6 +228,7 @@ class LLMTrainer:
         trainer.save_model(self.cfg.model_name)
         self.tokenizer.save_pretrained(self.cfg.model_name)
 
+        # --- Upload Model to S3 ---
         if self.cfg.model_s3_upload_path and str(self.cfg.model_s3_upload_path).lower() != "null":
             parsed = urlparse(self.cfg.model_s3_upload_path)
             bucket = parsed.netloc

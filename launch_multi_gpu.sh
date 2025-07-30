@@ -97,7 +97,7 @@ echo "shutdown -h now" | at now + 47 hours
 
 echo "[INFO] Starting training with torchrun at \$(date)" | tee -a /home/ubuntu/logs/train.log
 export TRANSFORMERS_CACHE=/home/ubuntu/hf_cache
-timeout 48h ./multi_gpu_run.sh "--debug --config $CONFIG_LOCAL_NAME" >> /home/ubuntu/logs/train.log 2>&1
+timeout 48h ./multi_gpu_run.sh "--config $CONFIG_LOCAL_NAME" >> /home/ubuntu/logs/train.log 2>&1
 
 echo "[INFO] Training completed at \$(date)"
 shutdown -h now

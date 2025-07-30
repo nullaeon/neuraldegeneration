@@ -15,18 +15,11 @@ from transformers import (
 from datasets import load_dataset
 import boto3
 from urllib.parse import urlparse
-import torch.distributed as dist
 from torch.distributed import is_initialized, get_rank, barrier
 
 # --- Utils ---
 def is_main_process():
     return not is_initialized() or get_rank() == 0
-
-def trace(msg):
-    if is_initialized():
-        print(f"[RANK {get_rank()}] {msg}", flush=True)
-    else:
-        print(f"[NO_DDP] {msg}", flush=True)
 
 # --- Config Dataclass ---
 @dataclass
@@ -71,18 +64,16 @@ class LLMTrainer:
         self.tokenizer.truncation_side = "right"
 
     def prepare_data(self):
-        trace("Preparing data")
         if is_main_process():
-            trace("Main process handling S3 downloads")
             if self.cfg.tokenizer_s3_uri and str(self.cfg.tokenizer_s3_uri).lower() != "null":
                 parsed = urlparse(self.cfg.tokenizer_s3_uri)
                 bucket = parsed.netloc
                 key = parsed.path.lstrip("/")
                 if not os.path.exists(self.cfg.tokenizer_path):
-                    trace(f"Downloading tokenizer from s3://{bucket}/{key}")
+                    print(f"[RANK 0] Downloading tokenizer from s3://{bucket}/{key}")
                     boto3.client("s3").download_file(bucket, key, self.cfg.tokenizer_path)
                 else:
-                    trace(f"Tokenizer already exists: {self.cfg.tokenizer_path}")
+                    print(f"[RANK 0] Tokenizer already exists: {self.cfg.tokenizer_path}")
 
             if self.cfg.dataset_s3_uris and str(self.cfg.dataset_s3_uris).lower() != "null":
                 for uri in self.cfg.dataset_s3_uris:
@@ -102,15 +93,13 @@ class LLMTrainer:
                             local_path = os.path.join("data/s3_cache", filename)
                             if not os.path.exists(local_path):
                                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                                trace(f"Downloading {key} → {local_path}")
+                                print(f"[RANK 0] Downloading {key} → {local_path}")
                                 s3.download_file(bucket, key, local_path)
                             else:
-                                trace(f"Skipping existing file {local_path}")
+                                print(f"[RANK 0] Skipping existing file {local_path}")
 
         if is_initialized():
-            trace("Waiting at barrier after data prep")
             barrier()
-            trace("Passed barrier")
 
         self.tokenizer = PreTrainedTokenizerFast(tokenizer_file=self.cfg.tokenizer_path)
         self._setup_tokenizer()
@@ -136,7 +125,6 @@ class LLMTrainer:
         return result
 
     def train(self):
-        trace("Starting training")
         num_proc = min(16, os.cpu_count())
         random.seed(42)
 
@@ -219,7 +207,6 @@ class LLMTrainer:
         self.tokenizer.save_pretrained(self.cfg.model_name)
 
         if is_main_process() and self.cfg.model_s3_upload_path and str(self.cfg.model_s3_upload_path).lower() != "null":
-            trace("Uploading model to S3")
             parsed = urlparse(self.cfg.model_s3_upload_path)
             bucket = parsed.netloc
             prefix = parsed.path.lstrip("/")
@@ -229,33 +216,28 @@ class LLMTrainer:
                     rel_path = os.path.relpath(full_path, self.cfg.model_name)
                     s3_key = os.path.join(prefix, rel_path)
                     boto3.client("s3").upload_file(full_path, bucket, s3_key)
-                    trace(f"Uploaded {full_path} → s3://{bucket}/{s3_key}")
-
-# --- Distributed Init ---
-def init_distributed(debug=False):
-    if debug:
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method="tcp://127.0.0.1:29500",
-                rank=0,
-                world_size=1
-            )
-        trace("Initialized fake CPU DDP backend (rank=0, world_size=1)")
-    else:
-        if not dist.is_initialized() and "RANK" in os.environ:
-            backend = "nccl" if torch.cuda.is_available() else "gloo"
-            dist.init_process_group(backend=backend)
-            trace(f"Initialized real DDP backend: {backend}")
+                    print(f"[RANK 0] Uploaded {full_path} → s3://{bucket}/{s3_key}")
 
 # --- CLI Entrypoint ---
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
-    parser.add_argument("--debug", action="store_true", help="Enable local CPU DDP debug mode")
+    parser.add_argument("--local", action="store_true", help="Run in local CPU-only mode with gloo backend")
     args = parser.parse_args()
 
-    init_distributed(debug=args.debug)
+    # Local CPU-only mode
+    if args.local:
+        print("[LOCAL MODE] Forcing CPU-only execution (gloo backend).")
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        torch.set_num_threads(1)
+
+    # Always-on debug info
+    if is_initialized():
+        print(f"[RANK {get_rank()}] DDP initialized. Backend: {torch.distributed.get_backend()}")
+    else:
+        print("[DEBUG] DDP not initialized, running single process.")
+    print(f"[DEBUG] Torch device count: {torch.cuda.device_count()}")
+    print(f"[DEBUG] Torch available devices: {[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())] if torch.cuda.is_available() else 'No GPU'}")
 
     cfg = TrainConfig.from_yaml(args.config)
     trainer = LLMTrainer(cfg)

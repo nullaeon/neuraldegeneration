@@ -129,6 +129,7 @@ class LLMTrainer:
         random.seed(42)
 
         file_list = []
+
         if self.cfg.dataset_s3_uris and str(self.cfg.dataset_s3_uris).lower() != "null":
             for filename in os.listdir("data/s3_cache"):
                 file_list.append(os.path.join("data/s3_cache", filename))
@@ -222,22 +223,12 @@ class LLMTrainer:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
-    parser.add_argument("--local", action="store_true", help="Run in local CPU-only mode with gloo backend")
+    parser.add_argument("--cpu_local", action="store_true", help="Run with CPU backend for local debugging")
     args = parser.parse_args()
 
-    # Local CPU-only mode
-    if args.local:
-        print("[LOCAL MODE] Forcing CPU-only execution (gloo backend).")
+    if args.cpu_local:
+        print("[DEBUG] Forcing torch CPU backend")
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
-        torch.set_num_threads(1)
-
-    # Always-on debug info
-    if is_initialized():
-        print(f"[RANK {get_rank()}] DDP initialized. Backend: {torch.distributed.get_backend()}")
-    else:
-        print("[DEBUG] DDP not initialized, running single process.")
-    print(f"[DEBUG] Torch device count: {torch.cuda.device_count()}")
-    print(f"[DEBUG] Torch available devices: {[torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())] if torch.cuda.is_available() else 'No GPU'}")
 
     cfg = TrainConfig.from_yaml(args.config)
     trainer = LLMTrainer(cfg)

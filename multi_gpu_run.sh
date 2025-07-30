@@ -5,7 +5,7 @@ set -e
 # --- Configuration ---
 IMAGE_NAME="heatdeathprotocol"
 TAG="latest"
-PYTHON_SCRIPT="./training/train.py"
+PYTHON_SCRIPT="./training/train_multi_gpu.py"
 DEFAULT_ARGS="--config training/configs/dev_cloud_test.yaml"
 
 # Allow args override

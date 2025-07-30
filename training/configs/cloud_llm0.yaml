@@ -3,14 +3,14 @@ tokenizer_path: training/tokenizer/tokenizer.json
 tokenizer_s3_uri: s3://nullaeon-cc-models/tokenizer/tokenizer.json
 
 # Dataset selection (local globs only)
-english_glob: training/data/english_only_subset/*.txt
+english_glob: training/data/english_only/*.txt
 generated_glob: NONE
-max_english_files: 1000
+max_english_files: 30000
 max_generated_files: 0
 
 # S3 dataset URIs (downloaded into data/s3_cache/)
 dataset_s3_uris:
-  - s3://nullaeon-cc-datasets/data/english_only_subset/
+  - s3://nullaeon-cc-datasets/data/english_only/
 
 # Output directories
 output_dir: output/model_llm0
@@ -20,7 +20,7 @@ model_name: cloud_llm0
 block_size: 1024
 batch_size: 10
 gradient_accum_steps: 2
-epochs: 10
+epochs: 3
 learning_rate: 3e-4
 warmup_steps: 10
 weight_decay: 0.01

@@ -5,8 +5,9 @@ We start with a human-authored corpus (e.g., a subset of Project Gutenberg), tra
 
 More details of experimental design can be found in the `experimental_design_phase_1.md` document. 
 
-This experiment is based on research conducted in the following work: 
+This experiment is based on research conducted in the following works: 
 [THE CURIOUS CASE OF NEURAL TEXT DeGENERATION, (Holtzman et al., 2020)](https://arxiv.org/abs/1904.09751)
+[AI models collapse when trained on recursively generated data, (Shumailov et al., 2024)](https://www.nature.com/articles/s41586-024-07566-y)
 
 ## Core Components
 
